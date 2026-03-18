@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install -r requirements.txt -q)",
+      "Bash(python -c \":*)"
+    ]
+  }
+}
