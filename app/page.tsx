@@ -132,25 +132,27 @@ export default function Page() {
               🤖 AI parameters active
             </div>
           )}
-          <Slider label="BB Period" value={params.bbPeriod} min={10} max={50} step={1}
-            onChange={(v) => updateParam("bbPeriod", v)} />
-          <Slider label="BB Std Dev" value={params.bbStd} min={1} max={3} step={0.1}
-            onChange={(v) => updateParam("bbStd", v)} />
+          <Slider label="Fast EMA" value={params.fastEma} min={5} max={25} step={1}
+            onChange={(v) => updateParam("fastEma", v)} />
+          <Slider label="Slow EMA" value={params.slowEma} min={15} max={50} step={1}
+            onChange={(v) => updateParam("slowEma", v)} />
+          <Slider label="Trend EMA" value={params.trendEma} min={30} max={200} step={5}
+            onChange={(v) => updateParam("trendEma", v)} />
           <Slider label="RSI Period" value={params.rsiPeriod} min={7} max={21} step={1}
             onChange={(v) => updateParam("rsiPeriod", v)} />
-          <Slider label="RSI Oversold" value={params.rsiOversold} min={20} max={45} step={1}
-            onChange={(v) => updateParam("rsiOversold", v)} />
-          <Slider label="RSI Overbought" value={params.rsiOverbought} min={55} max={80} step={1}
-            onChange={(v) => updateParam("rsiOverbought", v)} />
+          <Slider label="RSI Min" value={params.rsiLow} min={30} max={60} step={1}
+            onChange={(v) => updateParam("rsiLow", v)} />
+          <Slider label="RSI Max" value={params.rsiHigh} min={55} max={85} step={1}
+            onChange={(v) => updateParam("rsiHigh", v)} />
           <Slider label="Stop Loss (× ATR)" value={params.slMult} min={0.5} max={3} step={0.1}
             onChange={(v) => updateParam("slMult", v)} />
-          <Slider label="Take Profit (× ATR)" value={params.tpMult} min={0.5} max={5} step={0.1}
+          <Slider label="Take Profit (× ATR)" value={params.tpMult} min={1} max={6} step={0.1}
             onChange={(v) => updateParam("tpMult", v)} />
         </div>
 
         <div className="p-4 border-t border-border">
           <p className="text-[10px] text-muted font-mono">Data: BloFin perps · Paper only</p>
-          <p className="text-[10px] text-muted font-mono">No real orders · Paper only</p>
+          <p className="text-[10px] text-muted font-mono">EMA Cross · Trend Filter · ATR exits</p>
         </div>
       </aside>
 

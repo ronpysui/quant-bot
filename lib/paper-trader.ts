@@ -6,13 +6,16 @@ const PAPER_POSITION_USD = 1_000;
 
 export async function runCycle(symbol: string, params: Params): Promise<string> {
   await initSchema();
-  const candles = await fetchOHLCV(symbol, "1h", 7); // last 7 days is plenty
+  // Need enough bars for warmup (trendEma + buffer)
+  const lookbackDays = Math.max(7, Math.ceil(params.trendEma / 24) + 3);
+  const candles = await fetchOHLCV(symbol, "1h", lookbackDays);
   const bars = addIndicators(candles, params);
-  if (bars.length < 2) return "Not enough data.";
+  if (bars.length < 3) return "Not enough data.";
 
-  const prev = bars[bars.length - 2];
-  const last = bars[bars.length - 1];
-  const now = new Date().toISOString();
+  const b2   = bars[bars.length - 3]; // two bars ago
+  const prev = bars[bars.length - 2]; // previous bar (signal bar)
+  const last = bars[bars.length - 1]; // latest closed bar
+  const now  = new Date().toISOString();
 
   // Check existing position
   const { rows } = await sql`
@@ -21,7 +24,15 @@ export async function runCycle(symbol: string, params: Params): Promise<string> 
   const pos = rows[0];
 
   if (!pos) {
-    if (prev.close < prev.bbLower && prev.rsi < params.rsiOversold) {
+    const bullCross = b2.emaFast <= b2.emaSlow && prev.emaFast > prev.emaSlow;
+    const bearCross = b2.emaFast >= b2.emaSlow && prev.emaFast < prev.emaSlow;
+
+    if (
+      bullCross &&
+      prev.close > prev.emaTrend &&
+      prev.rsi > params.rsiLow &&
+      prev.rsi < params.rsiHigh
+    ) {
       await sql`
         INSERT INTO paper_positions (symbol, direction, entry_price, entry_ts, entry_atr)
         VALUES (${symbol}, 'LONG', ${last.open}, ${now}, ${prev.atr})
@@ -29,9 +40,15 @@ export async function runCycle(symbol: string, params: Params): Promise<string> 
           SET direction=EXCLUDED.direction, entry_price=EXCLUDED.entry_price,
               entry_ts=EXCLUDED.entry_ts, entry_atr=EXCLUDED.entry_atr
       `;
-      return `Entered LONG @ ${last.open.toFixed(2)}`;
+      return `Entered LONG @ ${last.open.toFixed(2)} (EMA cross + trend + RSI ${prev.rsi.toFixed(0)})`;
     }
-    if (prev.close > prev.bbUpper && prev.rsi > params.rsiOverbought) {
+
+    if (
+      bearCross &&
+      prev.close < prev.emaTrend &&
+      prev.rsi < (100 - params.rsiLow) &&
+      prev.rsi > (100 - params.rsiHigh)
+    ) {
       await sql`
         INSERT INTO paper_positions (symbol, direction, entry_price, entry_ts, entry_atr)
         VALUES (${symbol}, 'SHORT', ${last.open}, ${now}, ${prev.atr})
@@ -39,8 +56,9 @@ export async function runCycle(symbol: string, params: Params): Promise<string> 
           SET direction=EXCLUDED.direction, entry_price=EXCLUDED.entry_price,
               entry_ts=EXCLUDED.entry_ts, entry_atr=EXCLUDED.entry_atr
       `;
-      return `Entered SHORT @ ${last.open.toFixed(2)}`;
+      return `Entered SHORT @ ${last.open.toFixed(2)} (EMA cross + trend + RSI ${prev.rsi.toFixed(0)})`;
     }
+
     return "No signal — flat.";
   }
 
@@ -49,17 +67,19 @@ export async function runCycle(symbol: string, params: Params): Promise<string> 
   const tp = direction === "LONG" ? ep + params.tpMult * ea : ep - params.tpMult * ea;
 
   let exitPrice: number | null = null;
+
   if (direction === "LONG") {
-    if (last.low <= sl) exitPrice = sl;
+    if (last.low <= sl)  exitPrice = sl;
     else if (last.high >= tp) exitPrice = tp;
-    else if (last.close > last.bbMiddle && last.rsi > params.rsiExitLong) exitPrice = last.close;
+    else if (last.emaFast < last.emaSlow) exitPrice = last.close; // trend reversal
   } else {
     if (last.high >= sl) exitPrice = sl;
     else if (last.low <= tp) exitPrice = tp;
-    else if (last.close < last.bbMiddle && last.rsi < params.rsiExitShort) exitPrice = last.close;
+    else if (last.emaFast > last.emaSlow) exitPrice = last.close; // trend reversal
   }
 
-  if (exitPrice === null) return `Holding ${direction} @ ${ep.toFixed(2)}.`;
+  if (exitPrice === null)
+    return `Holding ${direction} @ ${ep.toFixed(2)} | SL ${sl.toFixed(2)} | TP ${tp.toFixed(2)}`;
 
   const pnl =
     direction === "LONG"

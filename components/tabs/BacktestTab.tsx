@@ -80,9 +80,9 @@ export default function BacktestTab({ symbol, days, params, onAiParams, onTrades
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">BB + RSI Mean-Reversion Scalper</h2>
+          <h2 className="text-lg font-bold text-white">EMA Cross Momentum Scalper</h2>
           <p className="text-muted text-sm">
-            Entries when price breaches Bollinger Bands and RSI confirms extreme readings.
+            Long/short on EMA crossovers filtered by trend direction and RSI momentum.
           </p>
         </div>
         <button

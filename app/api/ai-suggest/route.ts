@@ -8,9 +8,9 @@ export async function POST(req: NextRequest) {
   try {
     const { params, metrics } = await req.json();
 
-    const prompt = `You are an expert quantitative trader specialising in mean-reversion scalping on 1-hour crypto candles.
+    const prompt = `You are an expert quantitative trader specialising in EMA crossover momentum strategies on 1-hour crypto candles.
 
-The current Bollinger Band + RSI strategy produced these results:
+The current strategy (EMA Cross + RSI Momentum Filter) produced these results:
 
 Current Parameters:
 ${JSON.stringify(
@@ -30,14 +30,20 @@ Backtest Results:
 - Win Rate     : ${metrics.winRate.toFixed(2)}%
 - Total Trades : ${metrics.nTrades}
 
-Suggest improved parameters. Respond with ONLY a JSON object — no markdown, no explanation.
-Use exactly these keys: bbPeriod, bbStd, rsiPeriod, rsiOversold, rsiOverbought, rsiExitLong, rsiExitShort, slMult, tpMult
+Strategy logic:
+- LONG when fast EMA crosses above slow EMA, price > trend EMA, and rsiLow < RSI < rsiHigh
+- SHORT when fast EMA crosses below slow EMA, price < trend EMA, and (100-rsiHigh) < RSI < (100-rsiLow)
+- Exit on SL/TP (ATR multiples) or trend reversal (EMA cross back)
+
+Suggest improved parameters to maximise risk-adjusted returns (Sharpe > 1, positive return, controlled drawdown).
+Respond with ONLY a JSON object — no markdown, no explanation.
+
+Use exactly these keys: fastEma, slowEma, trendEma, rsiPeriod, rsiLow, rsiHigh, slMult, tpMult
 
 Valid ranges:
-bbPeriod: 10-50 (int), bbStd: 1.0-3.0, rsiPeriod: 7-21 (int),
-rsiOversold: 20-40 (int), rsiOverbought: 60-80 (int),
-rsiExitLong: 50-70 (int), rsiExitShort: 30-50 (int),
-slMult: 0.5-3.0, tpMult: 0.5-5.0`;
+fastEma: 5-25 (int), slowEma: 15-50 (int), trendEma: 30-200 (int, step 5),
+rsiPeriod: 7-21 (int), rsiLow: 30-60 (int), rsiHigh: 55-85 (int),
+slMult: 0.5-3.0, tpMult: 1.0-6.0`;
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -46,7 +52,6 @@ slMult: 0.5-3.0, tpMult: 0.5-5.0`;
     });
 
     let raw = (message.content[0] as { text: string }).text.trim();
-    // Strip accidental markdown fences
     if (raw.startsWith("```")) {
       raw = raw.replace(/^```[a-z]*\n?/, "").replace(/```$/, "").trim();
     }
