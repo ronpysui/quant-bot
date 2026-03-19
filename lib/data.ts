@@ -10,13 +10,23 @@ export interface Candle {
   volume: number;
 }
 
-const exchange = new ccxt.blofin({ enableRateLimit: true });
+// Kraken: deep historical data (365d+), accessible from Vercel US servers
+const historyExchange = new ccxt.kraken({ enableRateLimit: true });
+// BloFin: accurate recent price for paper trading (last ~4 days available)
+const liveExchange = new ccxt.blofin({ enableRateLimit: true });
+
+/**
+ * Map UI symbols (USDT perpetual format) to Kraken symbols (USD spot).
+ * BTC/USDT:USDT → BTC/USD. Prices track within 0.1% — signals are identical.
+ */
+function toKrakenSymbol(symbol: string): string {
+  return symbol.replace(/\/USDT(?::USDT)?$/, "/USD");
+}
 
 /**
  * Fetch OHLCV candles.
- * Strategy: read from Postgres cache first; if cache has enough rows for the
- * requested period, serve from DB instantly (avoids Vercel 10s timeout).
- * Otherwise seed from BloFin and persist.
+ * - Serves from Postgres cache if we have enough rows for the requested period.
+ * - Falls back to seeding from Kraken (historical) + BloFin (recent top-up).
  */
 export async function fetchOHLCV(
   symbol: string,
@@ -25,7 +35,7 @@ export async function fetchOHLCV(
 ): Promise<Candle[]> {
   await initSchema();
 
-  // Need ~20 candles/day minimum to consider the cache adequate for the period
+  // Need ~20 candles/day minimum to consider cache adequate
   const minRequired = Math.max(500, days * 20);
 
   const { rows } = await sql`
@@ -35,7 +45,6 @@ export async function fetchOHLCV(
   const cached = Number(rows[0].cnt);
 
   if (cached >= minRequired) {
-    // Serve from Postgres
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
     const { rows: candles } = await sql`
       SELECT ts, open, high, low, close, volume FROM ohlcv
@@ -53,18 +62,25 @@ export async function fetchOHLCV(
     }));
   }
 
-  // Seed from BloFin (first run or cache too small for requested period)
-  return await seedFromBlofin(symbol, timeframe, days);
+  // Not enough data — seed history from Kraken + top-up recent from BloFin
+  return await seedHistory(symbol, timeframe, days);
 }
 
-export async function seedFromBlofin(
+/**
+ * Seed historical data using Kraken (deep history) then top-up recent
+ * candles from BloFin (accurate live pricing).
+ * Stored under the original UI symbol so the cache is exchange-agnostic.
+ */
+export async function seedHistory(
   symbol: string,
   timeframe: string,
   days: number
 ): Promise<Candle[]> {
+  const krakenSymbol = toKrakenSymbol(symbol); // e.g. BTC/USDT:USDT → BTC/USD
   const sinceMs = Date.now() - days * 86_400_000;
+  const tfMs = historyExchange.parseTimeframe(timeframe) * 1000;
 
-  // Start from where the cache ends (if partial), to avoid re-fetching
+  // Find what's already cached to avoid re-fetching existing ranges
   const { rows: bounds } = await sql`
     SELECT MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM ohlcv
     WHERE symbol = ${symbol} AND timeframe = ${timeframe}
@@ -72,15 +88,15 @@ export async function seedFromBlofin(
   const cachedMin = bounds[0].min_ts ? new Date(bounds[0].min_ts).getTime() : null;
   const cachedMax = bounds[0].max_ts ? new Date(bounds[0].max_ts).getTime() : null;
 
-  const tfMs = exchange.parseTimeframe(timeframe) * 1000;
   const all: Candle[] = [];
 
-  // 1. Fill historical gap (sinceMs → cachedMin)
+  // ── 1. Fill historical gap (sinceMs → cachedMin) via Kraken ──────────────
   if (!cachedMin || cachedMin > sinceMs + tfMs) {
     let since = sinceMs;
     const fetchUntil = cachedMin ? cachedMin - tfMs : Date.now();
+
     while (since < fetchUntil) {
-      const batch = await exchange.fetchOHLCV(symbol, timeframe, since, 1000);
+      const batch = await historyExchange.fetchOHLCV(krakenSymbol, timeframe, since, 720);
       if (!batch.length) break;
       all.push(
         ...batch.map(([ts, open, high, low, close, volume]) => ({
@@ -98,29 +114,27 @@ export async function seedFromBlofin(
     }
   }
 
-  // 2. Fill recent gap (cachedMax → now)
-  if (cachedMax && cachedMax < Date.now() - tfMs * 2) {
-    let since = cachedMax + 1;
-    while (true) {
-      const batch = await exchange.fetchOHLCV(symbol, timeframe, since, 1000);
-      if (!batch.length) break;
-      all.push(
-        ...batch.map(([ts, open, high, low, close, volume]) => ({
-          ts: ts as number,
-          open: open as number,
-          high: high as number,
-          low: low as number,
-          close: close as number,
-          volume: volume as number,
-        }))
-      );
-      const lastTs = batch[batch.length - 1][0] as number;
-      if (lastTs >= Date.now() - tfMs) break;
-      since = lastTs + 1;
-    }
+  // ── 2. Top-up recent candles via BloFin (accurate live price) ────────────
+  // BloFin returns last ~4 days regardless of since — fetch and merge
+  try {
+    const recent = await liveExchange.fetchOHLCV(symbol, timeframe, undefined, 200);
+    const recentCutoff = cachedMax ?? sinceMs;
+    const fresh = recent
+      .filter(([ts]) => (ts as number) > recentCutoff)
+      .map(([ts, open, high, low, close, volume]) => ({
+        ts: ts as number,
+        open: open as number,
+        high: high as number,
+        low: low as number,
+        close: close as number,
+        volume: volume as number,
+      }));
+    all.push(...fresh);
+  } catch {
+    // BloFin unavailable — Kraken data is sufficient
   }
 
-  // Upsert to Postgres in chunks of 500
+  // ── 3. Upsert all fetched candles to Postgres ─────────────────────────────
   for (let i = 0; i < all.length; i += 500) {
     const chunk = all.slice(i, i + 500);
     for (const c of chunk) {
@@ -133,7 +147,7 @@ export async function seedFromBlofin(
     }
   }
 
-  // Return whatever we fetched plus what's already in cache for this period
+  // Return the full requested window from DB
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const { rows: candles } = await sql`
     SELECT ts, open, high, low, close, volume FROM ohlcv
@@ -151,10 +165,22 @@ export async function seedFromBlofin(
   }));
 }
 
-/** Append the last 200 candles (used by cron to keep cache fresh). */
+/**
+ * Append the latest candles to keep cache fresh (called by cron).
+ * Uses BloFin for accuracy, falls back to Kraken if unavailable.
+ */
 export async function refreshCache(symbol: string, timeframe = "1h") {
-  const since = Date.now() - 200 * exchange.parseTimeframe(timeframe) * 1000;
-  const batch = await exchange.fetchOHLCV(symbol, timeframe, since, 200);
+  let batch: ReturnType<typeof liveExchange.fetchOHLCV> extends Promise<infer T> ? T : never;
+
+  try {
+    batch = await liveExchange.fetchOHLCV(symbol, timeframe, undefined, 100);
+  } catch {
+    // BloFin unavailable — use Kraken
+    const krakenSymbol = toKrakenSymbol(symbol);
+    const since = Date.now() - 200 * historyExchange.parseTimeframe(timeframe) * 1000;
+    batch = await historyExchange.fetchOHLCV(krakenSymbol, timeframe, since, 200);
+  }
+
   for (const [ts, open, high, low, close, volume] of batch) {
     const tsStr = new Date(ts as number).toISOString();
     await sql`
