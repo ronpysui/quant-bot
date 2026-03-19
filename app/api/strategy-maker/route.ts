@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const batchSize: number = body.batchSize ?? 30;
+    const batchSize: number = body.batchSize ?? 100;
     const sortBy: SortColumn = body.sortBy ?? "total_return";
 
     const { ran, remaining } = await runOptimizerBatch(batchSize);

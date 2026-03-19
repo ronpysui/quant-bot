@@ -5,30 +5,44 @@ import { runBacktest } from "./backtester";
 import { runMonteCarlo } from "./monte-carlo";
 import type { Params } from "./strategy";
 
+/** Generate an inclusive integer (or float) range. */
+function range(start: number, stop: number, step = 1): number[] {
+  const arr: number[] = [];
+  for (let i = start; i <= stop; i = Math.round((i + step) * 1e9) / 1e9) arr.push(i);
+  return arr;
+}
+
 // ── Parameter grid ────────────────────────────────────────────────────────────
-// Each array is the discrete values tested for that parameter.
-// Constraints: slowEma > fastEma (enforced at generation time).
+// fastEma / slowEma: every integer in valid range for maximum EMA coverage.
+// Other params: representative sampling to keep total ≈ 104,500 combinations.
+//
+// Valid EMA pairs (slowEma > fastEma):
+//   fastEma 5-14 (10 values) × slowEma 15-51 step 2 (19 values) = 190 pairs
+//   fastEma 15-25 (11 values) × decreasing valid slowEma           = 173 pairs
+//   Total EMA pairs: 363
+// Total: 363 × 3 × 2 × 4 × 4 × 3 ≈ 104,544 combinations
 const GRID = {
-  fastEma:   [5, 8, 13, 21],
-  slowEma:   [15, 21, 34, 50],
-  trendEma:  [50, 100, 150, 200],
-  rsiPeriod: [7, 14],
-  rsiLow:    [30, 40, 50],
-  rsiHigh:   [60, 70, 80],   // always > rsiLow (min rsiHigh=60 > max rsiLow=50)
-  slMult:    [0.5, 1.0, 2.0],
-  tpMult:    [1.5, 2.5, 4.0],
-} as const;
+  fastEma:   range(5, 25),             // every integer 5..25  → 21 values
+  slowEma:   range(15, 51, 2),         // every other int 15..51 → 19 values
+  trendEma:  [50, 100, 200],           // short / mid / long → 3 values
+  rsiPeriod: [7, 14],                  // → 2 values
+  rsiLow:    [30, 45],                 // momentum floor → 2 values
+  rsiHigh:   [65, 80],                 // overbought ceiling → 2 values
+  slMult:    [0.5, 1.0, 2.0, 3.0],    // ATR stop-loss → 4 values
+  tpMult:    [1.5, 3.0, 5.0],         // ATR take-profit → 3 values
+};
 
 /** Build the full list of valid parameter combinations once at module load. */
 function buildAllCombos(): Params[] {
   const combos: Params[] = [];
   for (const fastEma of GRID.fastEma) {
     for (const slowEma of GRID.slowEma) {
-      if (slowEma <= fastEma) continue;           // slowEma must be strictly greater
+      if (slowEma <= fastEma) continue;         // slowEma must be strictly greater
       for (const trendEma of GRID.trendEma) {
         for (const rsiPeriod of GRID.rsiPeriod) {
           for (const rsiLow of GRID.rsiLow) {
             for (const rsiHigh of GRID.rsiHigh) {
+              if (rsiHigh <= rsiLow) continue;  // sanity guard
               for (const slMult of GRID.slMult) {
                 for (const tpMult of GRID.tpMult) {
                   combos.push({
@@ -48,7 +62,7 @@ function buildAllCombos(): Params[] {
   return combos;
 }
 
-const ALL_COMBOS = buildAllCombos();   // ~9,072 valid combos, built once
+const ALL_COMBOS = buildAllCombos(); // ≈ 104,544 valid combos, built once at startup
 
 function paramsHash(p: Params): string {
   return [p.fastEma, p.slowEma, p.trendEma, p.rsiPeriod,
@@ -67,19 +81,36 @@ export interface OptimizerStatus {
 
 export async function getOptimizerStatus(): Promise<OptimizerStatus> {
   await initSchema();
-  // Sync total_combos in case it changed (e.g. grid update)
-  await sql`
-    UPDATE optimizer_state
-    SET total_combos = ${ALL_COMBOS.length}
-    WHERE id = 1
-  `;
   const { rows: stateRows } = await sql`SELECT * FROM optimizer_state WHERE id = 1`;
   const { rows: countRows } = await sql`SELECT COUNT(*) AS cnt FROM strategy_results`;
+
+  const storedTotal = Number(stateRows[0].total_combos);
+
+  // If the grid changed (app update), reset the index so we re-scan the new grid.
+  // Existing results are kept — the existingSet pre-filter skips them efficiently.
+  if (storedTotal > 0 && storedTotal !== ALL_COMBOS.length) {
+    await sql`
+      UPDATE optimizer_state
+      SET next_index = 0, total_combos = ${ALL_COMBOS.length}, updated_at = NOW()
+      WHERE id = 1
+    `;
+    return {
+      nextIndex:   0,
+      totalCombos: ALL_COMBOS.length,
+      completed:   Number(countRows[0].cnt),
+      isDone:      false,
+      updatedAt:   new Date().toISOString(),
+    };
+  }
+
+  // Normal path — sync total_combos in case it was 0
+  await sql`UPDATE optimizer_state SET total_combos = ${ALL_COMBOS.length} WHERE id = 1`;
+
   return {
-    nextIndex:   stateRows[0].next_index,
+    nextIndex:   Number(stateRows[0].next_index),
     totalCombos: ALL_COMBOS.length,
     completed:   Number(countRows[0].cnt),
-    isDone:      stateRows[0].next_index >= ALL_COMBOS.length,
+    isDone:      Number(stateRows[0].next_index) >= ALL_COMBOS.length,
     updatedAt:   stateRows[0].updated_at ?? null,
   };
 }
@@ -97,7 +128,7 @@ export async function resetOptimizer(): Promise<void> {
  * even when remaining < batchSize at the end of the grid.
  */
 export async function runOptimizerBatch(
-  batchSize = 30
+  batchSize = 100
 ): Promise<{ ran: number; remaining: number }> {
   await initSchema();
 

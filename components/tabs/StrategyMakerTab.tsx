@@ -82,7 +82,7 @@ export default function StrategyMakerTab({ onLoadParams }: Props) {
           const res = await fetch("/api/strategy-maker", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ batchSize: 30, sortBy: sortRef.current }),
+            body: JSON.stringify({ batchSize: 100, sortBy: sortRef.current }),
           });
           const data = await res.json();
           if (data.error) { setError(data.error); break; }
