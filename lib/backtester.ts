@@ -198,7 +198,7 @@ export function monthlyPnlTable(
   const byMonth: Record<string, number[]> = {};
   for (const e of equity) {
     const d = new Date(e.ts);
-    const key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     if (!byMonth[key]) byMonth[key] = [];
     byMonth[key].push(e.value);
   }
