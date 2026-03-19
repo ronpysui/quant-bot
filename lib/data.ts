@@ -10,12 +10,12 @@ export interface Candle {
   volume: number;
 }
 
-const exchange = new ccxt.binance({ enableRateLimit: true });
+const exchange = new ccxt.bybit({ enableRateLimit: true });
 
 /**
  * Fetch OHLCV candles.
  * Strategy: read from Postgres cache first; if not populated, fetch from
- * Binance and persist.  This keeps the API route well within Vercel's 10s limit
+ * Bybit and persist.  This keeps the API route well within Vercel's 10s limit
  * after the first (one-time) seed.
  */
 export async function fetchOHLCV(
@@ -51,11 +51,11 @@ export async function fetchOHLCV(
     }));
   }
 
-  // Seed from Binance
-  return await seedFromBinance(symbol, timeframe, days);
+  // Seed from Bybit
+  return await seedFromBybit(symbol, timeframe, days);
 }
 
-export async function seedFromBinance(
+export async function seedFromBybit(
   symbol: string,
   timeframe: string,
   days: number

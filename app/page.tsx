@@ -141,7 +141,7 @@ export default function Page() {
         </div>
 
         <div className="p-4 border-t border-border">
-          <p className="text-[10px] text-muted font-mono">Data: Binance public API</p>
+          <p className="text-[10px] text-muted font-mono">Data: Bybit public API</p>
           <p className="text-[10px] text-muted font-mono">No real orders · Paper only</p>
         </div>
       </aside>
