@@ -93,47 +93,51 @@ export async function resetOptimizer(): Promise<void> {
 /**
  * Run a batch of backtests + Monte Carlo simulations.
  * Fetches OHLCV data once, then iterates through the next `batchSize` combos.
- * Safe to call concurrently — uses a DB-level state update at the END of the
- * batch so each invocation atomically claims its slice.
+ * Reads the old next_index before updating so the slice is always exact,
+ * even when remaining < batchSize at the end of the grid.
  */
 export async function runOptimizerBatch(
   batchSize = 30
 ): Promise<{ ran: number; remaining: number }> {
   await initSchema();
 
-  // Atomically claim the next slice of combos
-  const { rows } = await sql`
-    UPDATE optimizer_state
-    SET next_index   = LEAST(next_index + ${batchSize}, ${ALL_COMBOS.length}),
-        total_combos = ${ALL_COMBOS.length},
-        updated_at   = NOW()
-    WHERE id = 1
-    RETURNING (next_index - ${batchSize}) AS start_idx, next_index AS end_idx
-  `;
-
-  const startIdx = Math.max(0, Number(rows[0].start_idx));
-  const endIdx   = Math.min(Number(rows[0].end_idx), ALL_COMBOS.length);
-
-  if (startIdx >= ALL_COMBOS.length || startIdx >= endIdx) {
-    return { ran: 0, remaining: 0 };
-  }
-
-  const combosToRun = ALL_COMBOS.slice(startIdx, endIdx);
-
-  // Pre-filter hashes that already exist (idempotency — handles retries)
-  const hashes = combosToRun.map(paramsHash);
   const pool = createPool();
   try {
+    // 1. Read the OLD next_index first — this is the correct start of our slice.
+    //    Using the new value from RETURNING would give wrong start when remaining < batchSize.
+    const { rows: stateRows } = await pool.query<{ next_index: number }>(
+      `SELECT next_index FROM optimizer_state WHERE id = 1`
+    );
+    const startIdx = Number(stateRows[0].next_index);
+
+    if (startIdx >= ALL_COMBOS.length) {
+      return { ran: 0, remaining: 0 };
+    }
+
+    const endIdx = Math.min(startIdx + batchSize, ALL_COMBOS.length);
+
+    // 2. Advance the pointer immediately (claim this slice).
+    await pool.query(
+      `UPDATE optimizer_state
+       SET next_index = $1, total_combos = $2, updated_at = NOW()
+       WHERE id = 1`,
+      [endIdx, ALL_COMBOS.length]
+    );
+
+    const combosToRun = ALL_COMBOS.slice(startIdx, endIdx);
+    const hashes = combosToRun.map(paramsHash);
+
+    // 3. Pre-filter hashes already in DB (safe for retries / overlapping calls).
     const { rows: existingRows } = await pool.query<{ params_hash: string }>(
       `SELECT params_hash FROM strategy_results WHERE params_hash = ANY($1::text[])`,
       [hashes]
     );
     const existingSet = new Set(existingRows.map((r) => r.params_hash));
 
-    // Fetch OHLCV data once for this whole batch (1080 days, BTC only)
+    // 4. Fetch OHLCV data once for the entire batch.
     const candles = await fetchOHLCV("BTC/USDT:USDT", "1h", 1080);
 
-    // Run each combo
+    // 5. Run each combo.
     type Row = {
       hash: string; params: Params;
       totalReturn: number; sharpe: number; maxDrawdown: number;
@@ -154,22 +158,22 @@ export async function runOptimizerBatch(
 
       results.push({
         hash, params,
-        totalReturn:     metrics.totalReturn,
-        sharpe:          metrics.sharpe,
-        maxDrawdown:     metrics.maxDrawdown,
-        winRate:         metrics.winRate,
-        nTrades:         metrics.nTrades,
-        avgDuration:     metrics.avgDurationHrs,
-        finalCapital:    metrics.finalCapital,
-        mcP5:            mc?.p5            ?? null,
-        mcP50:           mc?.median        ?? null,
-        mcP95:           mc?.p95           ?? null,
-        mcPctProfit:     mc?.pctProfitable ?? null,
-        mcMedianReturn:  mc?.medianReturn  ?? null,
+        totalReturn:    metrics.totalReturn,
+        sharpe:         metrics.sharpe,
+        maxDrawdown:    metrics.maxDrawdown,
+        winRate:        metrics.winRate,
+        nTrades:        metrics.nTrades,
+        avgDuration:    metrics.avgDurationHrs,
+        finalCapital:   metrics.finalCapital,
+        mcP5:           mc?.p5            ?? null,
+        mcP50:          mc?.median        ?? null,
+        mcP95:          mc?.p95           ?? null,
+        mcPctProfit:    mc?.pctProfitable ?? null,
+        mcMedianReturn: mc?.medianReturn  ?? null,
       });
     }
 
-    // Batch upsert all results in one round-trip
+    // 6. Batch upsert — single round-trip for all results.
     if (results.length > 0) {
       await pool.query(
         `INSERT INTO strategy_results (
@@ -178,19 +182,13 @@ export async function runOptimizerBatch(
            mc_p5, mc_p50, mc_p95, mc_pct_profit, mc_median_return
          )
          SELECT
-           unnest($1::text[]),
-           unnest($2::text[]),
-           unnest($3::float8[]),
-           unnest($4::float8[]),
-           unnest($5::float8[]),
-           unnest($6::float8[]),
-           unnest($7::int[]),
-           unnest($8::float8[]),
+           unnest($1::text[]),  unnest($2::text[]),
+           unnest($3::float8[]), unnest($4::float8[]),
+           unnest($5::float8[]), unnest($6::float8[]),
+           unnest($7::int[]),    unnest($8::float8[]),
            unnest($9::float8[]),
-           unnest($10::float8[]),
-           unnest($11::float8[]),
-           unnest($12::float8[]),
-           unnest($13::float8[]),
+           unnest($10::float8[]), unnest($11::float8[]),
+           unnest($12::float8[]), unnest($13::float8[]),
            unnest($14::float8[])
          ON CONFLICT (params_hash) DO NOTHING`,
         [

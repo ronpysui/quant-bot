@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Params } from "@/lib/strategy";
 import type { OptimizerStatus, StrategyRow, SortColumn } from "@/lib/strategy-maker";
 
@@ -44,25 +44,28 @@ export default function StrategyMakerTab({ onLoadParams }: Props) {
   const [error, setError]         = useState<string | null>(null);
   const [loadedHash, setLoadedHash] = useState<string | null>(null);
   const runningRef = useRef(false);
+  const sortRef    = useRef<SortColumn>("total_return");
 
-  // Load initial status + results
-  const loadStatus = useCallback(async (sort: SortColumn = sortBy) => {
-    try {
-      const res  = await fetch(`/api/strategy-maker?sortBy=${sort}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setStatus(data.status);
-      setResults(data.results);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [sortBy]);
-
+  // Load initial status + auto-start the loop if work remains
   useEffect(() => {
-    loadStatus();
-  }, [loadStatus]);
+    async function init() {
+      try {
+        const res  = await fetch(`/api/strategy-maker?sortBy=total_return`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        setStatus(data.status);
+        setResults(data.results);
+        // Auto-start every time this tab mounts, unless optimizer is fully done
+        if (!data.status.isDone) setAutoRun(true);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+    init();
+  }, []); // only on mount — intentional empty deps
 
-  // Auto-run loop: fires batches back-to-back while enabled
+  // Auto-run loop: fires batches back-to-back while enabled.
+  // Uses sortRef instead of sortBy state to avoid restarting the loop on sort change.
   useEffect(() => {
     if (!autoRun) return;
     let cancelled = false;
@@ -76,10 +79,10 @@ export default function StrategyMakerTab({ onLoadParams }: Props) {
         runningRef.current = true;
         try {
           setLoading(true);
-          const res  = await fetch("/api/strategy-maker", {
+          const res = await fetch("/api/strategy-maker", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ batchSize: 30, sortBy }),
+            body: JSON.stringify({ batchSize: 30, sortBy: sortRef.current }),
           });
           const data = await res.json();
           if (data.error) { setError(data.error); break; }
@@ -93,15 +96,14 @@ export default function StrategyMakerTab({ onLoadParams }: Props) {
           runningRef.current = false;
           setLoading(false);
         }
-        // Small pause to prevent hammering the endpoint
-        await new Promise((r) => setTimeout(r, 800));
+        // Brief pause between batches
+        await new Promise((r) => setTimeout(r, 600));
       }
     }
 
     loop();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRun]);
+  }, [autoRun]); // sortRef is a ref — changes don't restart the loop
 
   async function handleReset() {
     if (!confirm("Reset all optimizer results? This cannot be undone.")) return;
@@ -111,7 +113,10 @@ export default function StrategyMakerTab({ onLoadParams }: Props) {
       await fetch("/api/strategy-maker", { method: "DELETE" });
       setResults([]);
       setLoadedHash(null);
-      await loadStatus();
+      // Reload status after reset
+      const res  = await fetch(`/api/strategy-maker?sortBy=${sortRef.current}`);
+      const data = await res.json();
+      if (!data.error) { setStatus(data.status); setResults(data.results); }
     } finally {
       setResetting(false);
     }
@@ -119,7 +124,16 @@ export default function StrategyMakerTab({ onLoadParams }: Props) {
 
   async function handleSortChange(col: SortColumn) {
     setSortBy(col);
-    await loadStatus(col);
+    sortRef.current = col;
+    try {
+      const res  = await fetch(`/api/strategy-maker?sortBy=${col}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setStatus(data.status);
+      setResults(data.results);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   function handleLoadParams(row: StrategyRow) {
