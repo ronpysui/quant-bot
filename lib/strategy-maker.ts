@@ -14,22 +14,22 @@ function range(start: number, stop: number, step = 1): number[] {
 
 // ── Parameter grid ────────────────────────────────────────────────────────────
 // fastEma / slowEma: every integer in valid range for maximum EMA coverage.
-// Other params: representative sampling to keep total ≈ 104,500 combinations.
+// Other params: representative sampling with filled gaps in SL/TP.
 //
 // Valid EMA pairs (slowEma > fastEma):
 //   fastEma 5-14 (10 values) × slowEma 15-50 step 1 (36 values) = 360 pairs
 //   fastEma 15-25 (11 values) × decreasing valid slowEma           = 290 pairs
 //   Total EMA pairs: 650
-// Total: 650 × 3 × 2 × 4 × 4 × 3 ≈ 187,200 combinations
+// Total: 650 × 3 × 2 × 4 × 5 × 5 ≈ 390,000 combinations (~4.5 hrs)
 const GRID = {
-  fastEma:   range(5, 25),             // every integer 5..25  → 21 values
-  slowEma:   range(15, 50),            // every integer 15..50 → 36 values
-  trendEma:  [50, 100, 200],           // short / mid / long → 3 values
-  rsiPeriod: [7, 14],                  // → 2 values
-  rsiLow:    [30, 45],                 // momentum floor → 2 values
-  rsiHigh:   [65, 80],                 // overbought ceiling → 2 values
-  slMult:    [0.5, 1.0, 2.0, 3.0],    // ATR stop-loss → 4 values
-  tpMult:    [1.5, 3.0, 5.0],         // ATR take-profit → 3 values
+  fastEma:   range(5, 25),                    // every integer 5..25  → 21 values
+  slowEma:   range(15, 50),                   // every integer 15..50 → 36 values
+  trendEma:  [50, 100, 200],                  // short / mid / long → 3 values
+  rsiPeriod: [7, 14],                         // → 2 values
+  rsiLow:    [30, 45],                        // momentum floor → 2 values
+  rsiHigh:   [65, 80],                        // overbought ceiling → 2 values
+  slMult:    [0.5, 1.0, 1.5, 2.0, 3.0],      // ATR stop-loss → 5 values
+  tpMult:    [1.5, 2.0, 2.5, 3.0, 5.0],      // ATR take-profit → 5 values
 };
 
 /** Build the full list of valid parameter combinations once at module load. */
