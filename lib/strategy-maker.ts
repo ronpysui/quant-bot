@@ -17,13 +17,13 @@ function range(start: number, stop: number, step = 1): number[] {
 // Other params: representative sampling to keep total ≈ 104,500 combinations.
 //
 // Valid EMA pairs (slowEma > fastEma):
-//   fastEma 5-14 (10 values) × slowEma 15-51 step 2 (19 values) = 190 pairs
-//   fastEma 15-25 (11 values) × decreasing valid slowEma           = 173 pairs
-//   Total EMA pairs: 363
-// Total: 363 × 3 × 2 × 4 × 4 × 3 ≈ 104,544 combinations
+//   fastEma 5-14 (10 values) × slowEma 15-50 step 1 (36 values) = 360 pairs
+//   fastEma 15-25 (11 values) × decreasing valid slowEma           = 290 pairs
+//   Total EMA pairs: 650
+// Total: 650 × 3 × 2 × 4 × 4 × 3 ≈ 187,200 combinations
 const GRID = {
   fastEma:   range(5, 25),             // every integer 5..25  → 21 values
-  slowEma:   range(15, 51, 2),         // every other int 15..51 → 19 values
+  slowEma:   range(15, 50),            // every integer 15..50 → 36 values
   trendEma:  [50, 100, 200],           // short / mid / long → 3 values
   rsiPeriod: [7, 14],                  // → 2 values
   rsiLow:    [30, 45],                 // momentum floor → 2 values
