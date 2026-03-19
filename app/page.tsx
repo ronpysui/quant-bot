@@ -149,11 +149,21 @@ export default function Page() {
             onChange={(v) => updateParam("slMult", v)} />
           <Slider label="Take Profit (× ATR)" value={params.tpMult} min={1} max={6} step={0.1}
             onChange={(v) => updateParam("tpMult", v)} />
+
+          <p className="text-muted text-xs uppercase tracking-widest font-mono pt-2">Filters</p>
+          <Slider label="ADX Min (0 = off)" value={params.adxMin} min={0} max={40} step={5}
+            onChange={(v) => updateParam("adxMin", v)} />
+          <Slider label="Vol Filter (× avg)" value={params.volumeMult} min={0} max={2} step={0.1}
+            onChange={(v) => updateParam("volumeMult", v)} />
+
+          <p className="text-muted text-xs uppercase tracking-widest font-mono pt-2">Exit</p>
+          <Slider label="Partial TP (× ATR, 0 = off)" value={params.partialTpMult} min={0} max={3} step={0.1}
+            onChange={(v) => updateParam("partialTpMult", v)} />
         </div>
 
         <div className="p-4 border-t border-border">
           <p className="text-[10px] text-muted font-mono">Data: BloFin perps · Paper only</p>
-          <p className="text-[10px] text-muted font-mono">EMA Cross · Trend Filter · ATR exits</p>
+          <p className="text-[10px] text-muted font-mono">EMA Cross · ADX · Vol · Partial TP</p>
         </div>
       </aside>
 

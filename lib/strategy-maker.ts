@@ -14,16 +14,17 @@ function range(start: number, stop: number, step = 1): number[] {
 
 // ── Parameter grid ────────────────────────────────────────────────────────────
 // fastEma / slowEma: every integer in valid range for maximum EMA coverage.
-// Other params: representative sampling with filled gaps in SL/TP.
+// fastEma: every integer for full coverage.
+// slowEma: step 2 to keep combo count manageable on Vercel (~1 hr auto-run).
 //
 // Valid EMA pairs (slowEma > fastEma):
-//   fastEma 5-14 (10 values) × slowEma 15-50 step 1 (36 values) = 360 pairs
-//   fastEma 15-25 (11 values) × decreasing valid slowEma           = 290 pairs
-//   Total EMA pairs: 650
-// Total: 650 × 3 × 2 × 4 × 5 × 5 ≈ 390,000 combinations (~4.5 hrs)
+//   fastEma 5-14 (10 values) × slowEma 15-51 step 2 (19 values) = 190 pairs
+//   fastEma 15-25 (11 values) × decreasing valid slowEma           = 173 pairs
+//   Total EMA pairs: 363
+// Total: 363 × 3 × 2 × 4 × 5 × 5 ≈ 108,900 combinations (~1 hr)
 const GRID = {
   fastEma:   range(5, 25),                    // every integer 5..25  → 21 values
-  slowEma:   range(15, 50),                   // every integer 15..50 → 36 values
+  slowEma:   range(15, 51, 2),                // every other int 15..51 → 19 values
   trendEma:  [50, 100, 200],                  // short / mid / long → 3 values
   rsiPeriod: [7, 14],                         // → 2 values
   rsiLow:    [30, 45],                        // momentum floor → 2 values
@@ -50,6 +51,11 @@ function buildAllCombos(): Params[] {
                     rsiLow, rsiHigh, slMult, tpMult,
                     positionSizePct: 1.0,
                     feePct: 0.001,
+                    adxPeriod: 14,
+                    adxMin: 20,
+                    volumeMA: 20,
+                    volumeMult: 0.8,
+                    partialTpMult: 1.0,
                   });
                 }
               }
@@ -230,6 +236,9 @@ export async function runOptimizerBatch(
             rsiLow: r.params.rsiLow, rsiHigh: r.params.rsiHigh,
             slMult: r.params.slMult, tpMult: r.params.tpMult,
             positionSizePct: r.params.positionSizePct, feePct: r.params.feePct,
+            adxPeriod: r.params.adxPeriod, adxMin: r.params.adxMin,
+            volumeMA: r.params.volumeMA, volumeMult: r.params.volumeMult,
+            partialTpMult: r.params.partialTpMult,
           })),
           results.map((r) => r.totalReturn),
           results.map((r) => r.sharpe),
