@@ -6,7 +6,7 @@ import MonteCarloTab from "@/components/tabs/MonteCarloTab";
 import PaperTradeTab from "@/components/tabs/PaperTradeTab";
 import { DEFAULT_PARAMS, type Params } from "@/lib/strategy";
 
-const PAIRS = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "DOGE/USD"];
+const PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT"];
 const TABS = ["📊 Backtest", "🎲 Monte Carlo", "🤖 Paper Trade"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -45,7 +45,7 @@ function Slider({
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState<Tab>("📊 Backtest");
-  const [symbol, setSymbol] = useState("BTC/USD");
+  const [symbol, setSymbol] = useState("BTC/USDT");
   const [days, setDays] = useState(365);
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
   const [tradePnls, setTradePnls] = useState<number[]>([]);
@@ -141,7 +141,7 @@ export default function Page() {
         </div>
 
         <div className="p-4 border-t border-border">
-          <p className="text-[10px] text-muted font-mono">Data: Kraken public API</p>
+          <p className="text-[10px] text-muted font-mono">Data: BloFin public API</p>
           <p className="text-[10px] text-muted font-mono">No real orders · Paper only</p>
         </div>
       </aside>
