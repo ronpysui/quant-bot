@@ -10,12 +10,12 @@ export interface Candle {
   volume: number;
 }
 
-const exchange = new ccxt.bybit({ enableRateLimit: true });
+const exchange = new ccxt.kraken({ enableRateLimit: true });
 
 /**
  * Fetch OHLCV candles.
  * Strategy: read from Postgres cache first; if not populated, fetch from
- * Bybit and persist.  This keeps the API route well within Vercel's 10s limit
+ * Kraken and persist.  This keeps the API route well within Vercel's 10s limit
  * after the first (one-time) seed.
  */
 export async function fetchOHLCV(
@@ -51,11 +51,11 @@ export async function fetchOHLCV(
     }));
   }
 
-  // Seed from Bybit
-  return await seedFromBybit(symbol, timeframe, days);
+  // Seed from Kraken
+  return await seedFromKraken(symbol, timeframe, days);
 }
 
-export async function seedFromBybit(
+export async function seedFromKraken(
   symbol: string,
   timeframe: string,
   days: number
