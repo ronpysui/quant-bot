@@ -1,0 +1,40 @@
+{
+  "name": "quant-scalp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ronpysui/quant-bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ronpysui/quant-bot/issues"
+  },
+  "homepage": "https://github.com/ronpysui/quant-bot#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vercel/postgres": "^0.10.0",
+    "autoprefixer": "^10.4.27",
+    "ccxt": "^4.5.44",
+    "next": "^14.2.35",
+    "postcss": "^8.5.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^3.8.0",
+    "tailwindcss": "^4.2.2",
+    "technicalindicators": "^3.1.0",
+    "typescript": "^5.9.3"
+  }
+}

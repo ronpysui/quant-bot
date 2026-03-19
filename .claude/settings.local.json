@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(pip install -r requirements.txt -q)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(rm -f app.py strategy.py backtester.py monte_carlo.py data_fetcher.py ai_advisor.py paper_trader.py db.py requirements.txt)",
+      "Bash(rm -rf .streamlit)",
+      "Bash(node --version)",
+      "Bash(npm --version)",
+      "Bash(npm init -y)",
+      "Bash(npm install next@14 react react-dom typescript @types/node @types/react @types/react-dom)",
+      "Bash(npm install tailwindcss postcss autoprefixer recharts ccxt technicalindicators @anthropic-ai/sdk @vercel/postgres)"
     ]
   }
 }

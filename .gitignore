@@ -1,17 +1,23 @@
-# Secrets — never commit
-.streamlit/secrets.toml
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
 
-# SQLite database (paper trade history, local only)
-data.db
+# Next.js
+.next/
+out/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-env/
+# Env — never commit
+.env
+.env.local
+.env*.local
+
+# Vercel
+.vercel
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Misc
+*.log
