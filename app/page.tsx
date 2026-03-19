@@ -4,6 +4,7 @@ import { useState } from "react";
 import BacktestTab from "@/components/tabs/BacktestTab";
 import MonteCarloTab from "@/components/tabs/MonteCarloTab";
 import PaperTradeTab from "@/components/tabs/PaperTradeTab";
+import StrategyMakerTab from "@/components/tabs/StrategyMakerTab";
 import { DEFAULT_PARAMS, type Params } from "@/lib/strategy";
 
 // BloFin uses perpetual futures format (symbol:settle)
@@ -15,7 +16,7 @@ const PAIR_LABELS: Record<string, string> = {
   "XRP/USDT:USDT": "XRP/USDT",
   "DOGE/USDT:USDT": "DOGE/USDT",
 };
-const TABS = ["📊 Backtest", "🎲 Monte Carlo", "🤖 Paper Trade"] as const;
+const TABS = ["📊 Backtest", "🎲 Monte Carlo", "🤖 Paper Trade", "⚙ Optimizer"] as const;
 type Tab = (typeof TABS)[number];
 
 function Slider({
@@ -191,6 +192,9 @@ export default function Page() {
           )}
           {activeTab === "🤖 Paper Trade" && (
             <PaperTradeTab symbol={symbol} params={params} />
+          )}
+          {activeTab === "⚙ Optimizer" && (
+            <StrategyMakerTab onLoadParams={handleAiParams} />
           )}
         </div>
       </main>
