@@ -48,7 +48,7 @@ function buildAllCombos(): Params[] {
                   combos.push({
                     fastEma, slowEma, trendEma, rsiPeriod,
                     rsiLow, rsiHigh, slMult, tpMult,
-                    positionSizePct: 0.1,
+                    positionSizePct: 1.0,
                     feePct: 0.001,
                   });
                 }

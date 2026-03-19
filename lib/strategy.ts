@@ -23,7 +23,7 @@ export const DEFAULT_PARAMS: Params = {
   rsiHigh: 70,
   slMult: 1.0,
   tpMult: 2.5,
-  positionSizePct: 0.1,
+  positionSizePct: 1.0,
   feePct: 0.001,
 };
 
