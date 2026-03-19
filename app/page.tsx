@@ -6,7 +6,15 @@ import MonteCarloTab from "@/components/tabs/MonteCarloTab";
 import PaperTradeTab from "@/components/tabs/PaperTradeTab";
 import { DEFAULT_PARAMS, type Params } from "@/lib/strategy";
 
-const PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT"];
+// BloFin uses perpetual futures format (symbol:settle)
+const PAIRS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "DOGE/USDT:USDT"];
+const PAIR_LABELS: Record<string, string> = {
+  "BTC/USDT:USDT": "BTC/USDT",
+  "ETH/USDT:USDT": "ETH/USDT",
+  "SOL/USDT:USDT": "SOL/USDT",
+  "XRP/USDT:USDT": "XRP/USDT",
+  "DOGE/USDT:USDT": "DOGE/USDT",
+};
 const TABS = ["📊 Backtest", "🎲 Monte Carlo", "🤖 Paper Trade"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -45,7 +53,7 @@ function Slider({
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState<Tab>("📊 Backtest");
-  const [symbol, setSymbol] = useState("BTC/USDT");
+  const [symbol, setSymbol] = useState("BTC/USDT:USDT");
   const [days, setDays] = useState(365);
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
   const [tradePnls, setTradePnls] = useState<number[]>([]);
@@ -82,7 +90,7 @@ export default function Page() {
             className="bg-bg border border-border rounded px-3 py-2 text-white text-sm font-mono w-full"
           >
             {PAIRS.map((p) => (
-              <option key={p}>{p}</option>
+              <option key={p} value={p}>{PAIR_LABELS[p] ?? p}</option>
             ))}
           </select>
 
@@ -141,7 +149,7 @@ export default function Page() {
         </div>
 
         <div className="p-4 border-t border-border">
-          <p className="text-[10px] text-muted font-mono">Data: BloFin public API</p>
+          <p className="text-[10px] text-muted font-mono">Data: BloFin perps · Paper only</p>
           <p className="text-[10px] text-muted font-mono">No real orders · Paper only</p>
         </div>
       </aside>
