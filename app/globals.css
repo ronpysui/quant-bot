@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Explicit content paths — Tailwind v4 auto-detection can miss sibling dirs */
+@source "../app/**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
+
 @theme {
   --color-bg: #0a0b0d;
   --color-card: #111318;

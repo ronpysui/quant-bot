@@ -13,15 +13,16 @@ import {
 
 interface Props {
   data: { ts: number; value: number }[];
+  initialCapital?: number;
 }
 
 const fmt = (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const fmtDate = (ts: number) =>
   new Date(ts).toLocaleDateString(undefined, { month: "short", year: "2-digit" });
 
-export default function EquityChart({ data }: Props) {
+export default function EquityChart({ data, initialCapital = 1000 }: Props) {
   const sampled = data.filter((_, i) => i % Math.max(1, Math.floor(data.length / 500)) === 0);
-  const isPositive = data.length > 0 && data.at(-1)!.value >= 10_000;
+  const isPositive = data.length > 0 && data.at(-1)!.value >= initialCapital;
 
   return (
     <ResponsiveContainer width="100%" height={320}>
@@ -54,7 +55,7 @@ export default function EquityChart({ data }: Props) {
           formatter={(v) => [fmt(Number(v)), "Portfolio"]}
           labelFormatter={(ts) => new Date(Number(ts)).toLocaleString()}
         />
-        <ReferenceLine y={10000} stroke="#64748b" strokeDasharray="4 4" label={{ value: "Start", fill: "#64748b", fontSize: 10 }} />
+        <ReferenceLine y={initialCapital} stroke="#64748b" strokeDasharray="4 4" label={{ value: "Start", fill: "#64748b", fontSize: 10 }} />
         <Area
           type="monotone"
           dataKey="value"

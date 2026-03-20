@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Refresh cache + run paper trading cycle for active symbols
-  const symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT"];
+  const symbols = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"];
   const paperResults: Record<string, string> = {};
 
   for (const sym of symbols) {

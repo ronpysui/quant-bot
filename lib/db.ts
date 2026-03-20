@@ -28,12 +28,18 @@ export async function initSchema() {
   `;
   await sql`
     CREATE TABLE IF NOT EXISTS paper_positions (
-      symbol      TEXT PRIMARY KEY,
-      direction   TEXT,
-      entry_price FLOAT8,
-      entry_ts    TIMESTAMPTZ,
-      entry_atr   FLOAT8
+      symbol           TEXT PRIMARY KEY,
+      direction        TEXT,
+      entry_price      FLOAT8,
+      entry_ts         TIMESTAMPTZ,
+      entry_atr        FLOAT8,
+      entry_bb_middle  FLOAT8
     )
+  `;
+  // Add entry_bb_middle to existing tables that predate this column
+  await sql`
+    ALTER TABLE paper_positions
+    ADD COLUMN IF NOT EXISTS entry_bb_middle FLOAT8
   `;
   await sql`
     CREATE TABLE IF NOT EXISTS strategy_results (
@@ -54,19 +60,28 @@ export async function initSchema() {
       created_at       TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  // Add strategy + symbol columns (tracks which grid + pair produced each row)
+  await sql`ALTER TABLE strategy_results ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'meanrev'`;
+  await sql`ALTER TABLE strategy_results ADD COLUMN IF NOT EXISTS symbol   TEXT DEFAULT 'BTC/USDT:USDT'`;
+
+  // optimizer_state_kv: TEXT primary key = "strategy:symbol", replaces the old integer-id table
   await sql`
-    CREATE TABLE IF NOT EXISTS optimizer_state (
-      id          INT PRIMARY KEY DEFAULT 1,
-      next_index  INT  DEFAULT 0,
-      total_combos INT DEFAULT 0,
-      updated_at  TIMESTAMPTZ DEFAULT NOW()
+    CREATE TABLE IF NOT EXISTS optimizer_state_kv (
+      state_key    TEXT PRIMARY KEY,
+      next_index   INT  NOT NULL DEFAULT 0,
+      total_combos INT  NOT NULL DEFAULT 0,
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
     )
   `;
-  // Ensure the single optimizer_state row exists
+
+  // Legacy table kept for backward compat — no longer written to
   await sql`
-    INSERT INTO optimizer_state (id, next_index, total_combos)
-    VALUES (1, 0, 0)
-    ON CONFLICT (id) DO NOTHING
+    CREATE TABLE IF NOT EXISTS optimizer_state (
+      id           INT PRIMARY KEY DEFAULT 1,
+      next_index   INT  DEFAULT 0,
+      total_combos INT  DEFAULT 0,
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )
   `;
 }
 

@@ -1,6 +1,7 @@
 import ccxt from "ccxt";
 import { sql, initSchema } from "./db";
 import { createPool } from "@vercel/postgres";
+import { fetchFuturesOHLCV } from "./data-futures";
 
 export interface Candle {
   ts: number; // unix ms
@@ -90,6 +91,11 @@ export async function fetchOHLCV(
   timeframe = "1h",
   days = 365
 ): Promise<Candle[]> {
+  // Route CME futures symbols (e.g. MNQ=F, NQ=F) to Yahoo Finance
+  if (symbol.endsWith("=F")) {
+    return fetchFuturesOHLCV(symbol, days);
+  }
+
   await initSchema();
 
   const windowMs    = days * 86_400_000;
@@ -120,7 +126,10 @@ export async function fetchOHLCV(
   let toTs   = minTs ?? Date.now();
   const newCandles: Candle[] = [];
 
-  for (let i = 0; i < 6; i++) {
+  // Each CryptoCompare page covers 2000 hours (~83 days). Calculate how many
+  // pages are needed to cover the full requested window, plus 2 spare pages.
+  const maxBatches = Math.ceil((days * 24) / 2000) + 2;
+  for (let i = 0; i < maxBatches; i++) {
     const batch = await fetchCC(fsym, tsym, toTs, 2000);
     if (!batch.length) break;
     newCandles.push(...batch);

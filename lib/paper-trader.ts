@@ -1,21 +1,19 @@
 import { sql, initSchema } from "./db";
 import { fetchOHLCV } from "./data";
 import { addIndicators, type Params } from "./strategy";
-
-const PAPER_POSITION_USD = 1_000;
+import { isRTH, isScalpWindow } from "./backtester";
 
 export async function runCycle(symbol: string, params: Params): Promise<string> {
   await initSchema();
-  // Need enough bars for warmup (trendEma + buffer)
-  const lookbackDays = Math.max(7, Math.ceil(params.trendEma / 24) + 3);
-  const candles = await fetchOHLCV(symbol, "1h", lookbackDays);
+  // 7 days = 168 hourly bars, sufficient warmup for BB up to period 32
+  const candles = await fetchOHLCV(symbol, "1h", 7);
   const bars = addIndicators(candles, params);
-  if (bars.length < 3) return "Not enough data.";
+  if (bars.length < 2) return "Not enough data.";
 
-  const b2   = bars[bars.length - 3]; // two bars ago
-  const prev = bars[bars.length - 2]; // previous bar (signal bar)
-  const last = bars[bars.length - 1]; // latest closed bar
+  const prev = bars[bars.length - 2]; // signal bar (previous closed bar)
+  const last = bars[bars.length - 1]; // latest closed bar (entry/exit at open)
   const now  = new Date().toISOString();
+  const isFutures = params.assetType === "futures";
 
   // Check existing position
   const { rows } = await sql`
@@ -24,67 +22,130 @@ export async function runCycle(symbol: string, params: Params): Promise<string> 
   const pos = rows[0];
 
   if (!pos) {
-    const bullCross = b2.emaFast <= b2.emaSlow && prev.emaFast > prev.emaSlow;
-    const bearCross = b2.emaFast >= b2.emaSlow && prev.emaFast < prev.emaSlow;
-
-    if (
-      bullCross &&
-      prev.close > prev.emaTrend &&
-      prev.rsi > params.rsiLow &&
-      prev.rsi < params.rsiHigh
-    ) {
-      await sql`
-        INSERT INTO paper_positions (symbol, direction, entry_price, entry_ts, entry_atr)
-        VALUES (${symbol}, 'LONG', ${last.open}, ${now}, ${prev.atr})
-        ON CONFLICT (symbol) DO UPDATE
-          SET direction=EXCLUDED.direction, entry_price=EXCLUDED.entry_price,
-              entry_ts=EXCLUDED.entry_ts, entry_atr=EXCLUDED.entry_atr
-      `;
-      return `Entered LONG @ ${last.open.toFixed(2)} (EMA cross + trend + RSI ${prev.rsi.toFixed(0)})`;
+    // Window filter
+    if (params.filterRTH) {
+      const inWindow = params.strategy === "scalp" ? isScalpWindow(prev.ts) : isRTH(prev.ts);
+      if (!inWindow) {
+        const label = params.strategy === "scalp" ? "Outside 9:30–11:00 window" : "Outside RTH";
+        return `${label} — no signal. ${new Date(prev.ts).toUTCString()}`;
+      }
     }
 
-    if (
-      bearCross &&
-      prev.close < prev.emaTrend &&
-      prev.rsi < (100 - params.rsiLow) &&
-      prev.rsi > (100 - params.rsiHigh)
-    ) {
-      await sql`
-        INSERT INTO paper_positions (symbol, direction, entry_price, entry_ts, entry_atr)
-        VALUES (${symbol}, 'SHORT', ${last.open}, ${now}, ${prev.atr})
-        ON CONFLICT (symbol) DO UPDATE
-          SET direction=EXCLUDED.direction, entry_price=EXCLUDED.entry_price,
-              entry_ts=EXCLUDED.entry_ts, entry_atr=EXCLUDED.entry_atr
+    // Scalp: enforce max 2 trades per session (rolling 24h as proxy for current session)
+    if (params.strategy === "scalp" && params.filterRTH) {
+      const cutoff = new Date(Date.now() - 24 * 3_600_000).toISOString();
+      const { rows: recent } = await sql`
+        SELECT COUNT(*) AS cnt FROM paper_trades
+        WHERE symbol = ${symbol} AND ts > ${cutoff} AND status = 'CLOSED'
       `;
-      return `Entered SHORT @ ${last.open.toFixed(2)} (EMA cross + trend + RSI ${prev.rsi.toFixed(0)})`;
+      const tradesToday = parseInt(String(recent[0]?.cnt ?? "0"));
+      if (tradesToday >= 2) {
+        return `Session limit reached — ${tradesToday}/2 trades today. No new entries.`;
+      }
     }
 
-    return "No signal — flat.";
+    let longSignal: boolean;
+    let shortSignal: boolean;
+
+    if (params.strategy === "scalp") {
+      // VWAP: buy below fair value (order flow discount zone); volume confirmation
+      const vwapLongOk  = isNaN(prev.vwap) || prev.close < prev.vwap;
+      const vwapShortOk = isNaN(prev.vwap) || prev.close > prev.vwap;
+      const volOk = isNaN(prev.volSma) || prev.volSma === 0
+        || prev.volume > prev.volSma * params.volFilter;
+      const rsiSellZone = 100 - params.rsiMid;
+      longSignal  = volOk && vwapLongOk && prev.emaF > prev.emaS
+        && prev.close < prev.bbLower && prev.rsi < params.rsiMid;
+      shortSignal = volOk && vwapShortOk && params.allowShorts && prev.emaF < prev.emaS
+        && prev.close > prev.bbUpper && prev.rsi > rsiSellZone;
+    } else {
+      const rsiOverbought = 100 - params.rsiOversold;
+      longSignal  = prev.close < prev.bbLower && prev.rsi < params.rsiOversold;
+      shortSignal = params.allowShorts && prev.close > prev.bbUpper && prev.rsi > rsiOverbought;
+    }
+
+    if (longSignal) {
+      // TP: scalp = ATR-based fast target above entry; mean rev = BB middle
+      const tpTarget = params.strategy === "scalp"
+        ? last.open + params.atrTarget * prev.atr
+        : prev.bbMiddle;
+      await sql`
+        INSERT INTO paper_positions
+          (symbol, direction, entry_price, entry_ts, entry_atr, entry_bb_middle)
+        VALUES
+          (${symbol}, 'LONG', ${last.open}, ${now}, ${prev.atr}, ${tpTarget})
+        ON CONFLICT (symbol) DO UPDATE
+          SET direction=EXCLUDED.direction, entry_price=EXCLUDED.entry_price,
+              entry_ts=EXCLUDED.entry_ts, entry_atr=EXCLUDED.entry_atr,
+              entry_bb_middle=EXCLUDED.entry_bb_middle
+      `;
+      const signalTag = params.strategy === "scalp"
+        ? `EMA up | BB touch | RSI ${prev.rsi.toFixed(0)}`
+        : `BB lower | RSI ${prev.rsi.toFixed(0)}`;
+      return `Entered LONG @ ${last.open.toFixed(2)} — ${signalTag} | target ${tpTarget.toFixed(2)}`;
+    }
+
+    if (shortSignal) {
+      const tpTarget = params.strategy === "scalp"
+        ? last.open - params.atrTarget * prev.atr
+        : prev.bbMiddle;
+      await sql`
+        INSERT INTO paper_positions
+          (symbol, direction, entry_price, entry_ts, entry_atr, entry_bb_middle)
+        VALUES
+          (${symbol}, 'SHORT', ${last.open}, ${now}, ${prev.atr}, ${tpTarget})
+        ON CONFLICT (symbol) DO UPDATE
+          SET direction=EXCLUDED.direction, entry_price=EXCLUDED.entry_price,
+              entry_ts=EXCLUDED.entry_ts, entry_atr=EXCLUDED.entry_atr,
+              entry_bb_middle=EXCLUDED.entry_bb_middle
+      `;
+      const signalTag = params.strategy === "scalp"
+        ? `EMA down | BB touch | RSI ${prev.rsi.toFixed(0)}`
+        : `BB upper | RSI ${prev.rsi.toFixed(0)}`;
+      return `Entered SHORT @ ${last.open.toFixed(2)} — ${signalTag} | target ${tpTarget.toFixed(2)}`;
+    }
+
+    const noSigDetail = params.strategy === "scalp"
+      ? `EMA[${prev.emaF.toFixed(0)}/${prev.emaS.toFixed(0)}] RSI ${prev.rsi.toFixed(0)} VWAP ${prev.vwap.toFixed(0)} Vol ${prev.volume.toFixed(0)} (sma ${prev.volSma.toFixed(0)}) BB[${prev.bbLower.toFixed(0)}–${prev.bbUpper.toFixed(0)}]`
+      : `RSI ${prev.rsi.toFixed(0)} BB[${prev.bbLower.toFixed(0)}–${prev.bbUpper.toFixed(0)}]`;
+    return `No signal — flat. ${noSigDetail}, close ${prev.close.toFixed(0)}`;
   }
 
-  const { direction, entry_price: ep, entry_atr: ea } = pos;
-  const sl = direction === "LONG" ? ep - params.slMult * ea : ep + params.slMult * ea;
-  const tp = direction === "LONG" ? ep + params.tpMult * ea : ep - params.tpMult * ea;
+  const { direction, entry_price: ep, entry_atr: ea, entry_bb_middle: target } = pos;
+  const isLong = direction === "LONG";
+
+  const sl = isLong
+    ? ep - params.slMult * ea
+    : ep + params.slMult * ea;
+
+  const revTarget = target ?? last.bbMiddle;
 
   let exitPrice: number | null = null;
+  let exitReason = "";
 
-  if (direction === "LONG") {
-    if (last.low <= sl)  exitPrice = sl;
-    else if (last.high >= tp) exitPrice = tp;
-    else if (last.emaFast < last.emaSlow) exitPrice = last.close; // trend reversal
+  if (isLong) {
+    if (last.low  <= sl)             { exitPrice = sl;        exitReason = "SL"; }
+    else if (last.high >= revTarget) { exitPrice = revTarget; exitReason = "mean reversion"; }
   } else {
-    if (last.high >= sl) exitPrice = sl;
-    else if (last.low <= tp) exitPrice = tp;
-    else if (last.emaFast > last.emaSlow) exitPrice = last.close; // trend reversal
+    if (last.high >= sl)             { exitPrice = sl;        exitReason = "SL"; }
+    else if (last.low  <= revTarget) { exitPrice = revTarget; exitReason = "mean reversion"; }
   }
 
   if (exitPrice === null)
-    return `Holding ${direction} @ ${ep.toFixed(2)} | SL ${sl.toFixed(2)} | TP ${tp.toFixed(2)}`;
+    return `Holding ${direction} @ ${ep.toFixed(2)} | SL ${sl.toFixed(2)} | target ${revTarget.toFixed(2)} | current ${last.close.toFixed(2)}`;
 
-  const pnl =
-    direction === "LONG"
-      ? ((exitPrice - ep) / ep) * PAPER_POSITION_USD
-      : ((ep - exitPrice) / ep) * PAPER_POSITION_USD;
+  // PnL: futures uses pts × multiplier × contracts; crypto uses % × notional
+  let pnl: number;
+  if (isFutures) {
+    const pts = isLong ? exitPrice - ep : ep - exitPrice;
+    pnl = pts * params.contractMultiplier * params.numContracts
+        - params.feeDollar * params.numContracts * 2; // entry + exit fee
+  } else {
+    const positionNotional = params.initialCapital * params.positionSizePct;
+    pnl = isLong
+      ? ((exitPrice - ep) / ep) * positionNotional
+      : ((ep - exitPrice) / ep) * positionNotional;
+  }
 
   await sql`
     INSERT INTO paper_trades (ts, symbol, direction, entry_price, exit_price, pnl, status)
@@ -92,7 +153,7 @@ export async function runCycle(symbol: string, params: Params): Promise<string> 
   `;
   await sql`DELETE FROM paper_positions WHERE symbol = ${symbol}`;
 
-  return `Closed ${direction} @ ${exitPrice.toFixed(2)} | PnL: $${pnl.toFixed(2)}`;
+  return `Closed ${direction} @ ${exitPrice.toFixed(2)} (${exitReason}) | PnL: $${pnl.toFixed(2)}`;
 }
 
 export async function getTrades(symbol?: string) {
